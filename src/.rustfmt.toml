@@ -1,0 +1,6 @@
+edition = "2018"
+hard_tabs = true
+max_width = 120
+reorder_modules = true
+use_field_init_shorthand = true
+use_try_shorthand = true
