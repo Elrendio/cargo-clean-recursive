@@ -33,4 +33,8 @@ cargo clean-recursive --doc
 
 You can specify `--release` and `--doc` at the same time.
 
+To exclude some dirs you know won't have rust project in them, you can use `--exclude_dirs / -ed`:
 
+```
+cargo clean-recursive --exclude_dirs=node_modules
+```
