@@ -39,9 +39,9 @@ fn _main() -> Result<()> {
 		.arg(Arg::with_name("path").short("p").long("path").help("Target directory"))
 		.get_matches_from(&args);
 
-	let delete_mode = DeleteMode {
-		doc: matches.is_present("doc"),
-		release: matches.is_present("release"),
+	let delete_mode = match (matches.is_present("doc"), matches.is_present("release")) {
+		(false, false) => DeleteMode::All,
+		(doc, release) => DeleteMode::Partial { doc, release },
 	};
 
 	let depth_str = matches.value_of("depth").expect("'depth' should be exists");
@@ -55,17 +55,17 @@ fn _main() -> Result<()> {
 		current_dir().context("getting current_dir")?
 	};
 
-	process_dir(Path::new(&path), depth, delete_mode)?;
+	process_dir(Path::new(&path), depth, &delete_mode)?;
 
 	Ok(())
 }
 
-fn process_dir(path: &Path, depth: usize, del_mode: DeleteMode) -> Result<()> {
+fn process_dir(path: &Path, depth: usize, del_mode: &DeleteMode) -> Result<()> {
 	if depth == 0 {
 		return Ok(());
 	}
 
-	detect_and_clean(path, del_mode).with_context(|| format!("cleaning directory {:?}", path))?;
+	detect_and_clean(path, &del_mode).with_context(|| format!("cleaning directory {:?}", path))?;
 
 	for e in path
 		.read_dir()
@@ -85,7 +85,7 @@ fn process_dir(path: &Path, depth: usize, del_mode: DeleteMode) -> Result<()> {
 	Ok(())
 }
 
-fn detect_and_clean(path: &Path, del_mode: DeleteMode) -> Result<()> {
+fn detect_and_clean(path: &Path, del_mode: &DeleteMode) -> Result<()> {
 	if !path.join("Cargo.toml").exists() {
 		return Ok(());
 	}
@@ -97,41 +97,30 @@ fn detect_and_clean(path: &Path, del_mode: DeleteMode) -> Result<()> {
 
 	eprintln!("Cleaning {:?}", path);
 
-	if del_mode.do_all() {
-		Command::new("cargo").args(&["clean"]).current_dir(path).output()?;
+	match del_mode {
+		DeleteMode::All => {
+			Command::new("cargo").args(&["clean"]).current_dir(path).output()?;
+		}
+		DeleteMode::Partial { doc, release } => {
+			if *doc {
+				Command::new("cargo")
+					.args(&["clean", "--doc"])
+					.current_dir(path)
+					.output()?;
+			}
+			if *release {
+				Command::new("cargo")
+					.args(&["clean", "--release"])
+					.current_dir(path)
+					.output()?;
+			}
+		}
 	}
-	if del_mode.do_release() {
-		Command::new("cargo")
-			.args(&["clean", "--release"])
-			.current_dir(path)
-			.output()?;
-	}
-	if del_mode.do_doc() {
-		Command::new("cargo")
-			.args(&["clean", "--doc"])
-			.current_dir(path)
-			.output()?;
-	}
-
 	Ok(())
 }
 
-#[derive(Debug, Clone, Copy)]
-struct DeleteMode {
-	doc: bool,
-	release: bool,
-}
-
-impl DeleteMode {
-	fn do_all(self) -> bool {
-		!self.release && !self.doc
-	}
-
-	fn do_doc(self) -> bool {
-		self.doc
-	}
-
-	fn do_release(self) -> bool {
-		self.release
-	}
+#[derive(Debug)]
+enum DeleteMode {
+	All,
+	Partial { doc: bool, release: bool },
 }
