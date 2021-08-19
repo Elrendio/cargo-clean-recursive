@@ -37,9 +37,15 @@ fn _main() -> Result<()> {
 				.help("Recursive serarch depth limit"),
 		)
 		.arg(Arg::with_name("path").short("p").long("path").help("Target directory"))
+		.arg(
+			Arg::with_name("exclude_dirs")
+				.short("ed")
+				.long("exclude_dirs")
+				.help("Exclude directories"),
+		)
 		.get_matches_from(&args);
 
-	let delete_mode = match (matches.is_present("doc"), matches.is_present("release")) {
+	let del_mode = match (matches.is_present("doc"), matches.is_present("release")) {
 		(false, false) => DeleteMode::All,
 		(doc, release) => DeleteMode::Partial { doc, release },
 	};
@@ -55,25 +61,48 @@ fn _main() -> Result<()> {
 		current_dir().context("getting current_dir")?
 	};
 
-	process_dir(Path::new(&path), depth, &delete_mode)?;
+	let exclude_dirs = if let Some(exclude_dirs) = matches.value_of("exclude_dirs") {
+		exclude_dirs.split(' ').collect::<Vec<_>>()
+	} else {
+		Default::default()
+	};
+
+	process_dir(Path::new(&path), depth, &Config { exclude_dirs, del_mode })?;
 
 	Ok(())
 }
 
-fn process_dir(path: &Path, depth: usize, del_mode: &DeleteMode) -> Result<()> {
+struct Config<'s> {
+	exclude_dirs: Vec<&'s str>,
+	del_mode: DeleteMode,
+}
+
+#[derive(Debug)]
+enum DeleteMode {
+	All,
+	Partial { doc: bool, release: bool },
+}
+
+fn process_dir(path: &Path, depth: usize, config: &Config) -> Result<()> {
 	if depth == 0 {
 		return Ok(());
 	}
 
-	detect_and_clean(path, &del_mode).with_context(|| format!("cleaning directory {:?}", path))?;
+	detect_and_clean(path, &config.del_mode).with_context(|| format!("cleaning directory {:?}", path))?;
 
 	for e in path
 		.read_dir()
 		.with_context(|| format!("reading directory {:?}", path.canonicalize()))?
 	{
 		let e = e?;
-		if e.file_type()?.is_dir() {
-			if let Err(e) = process_dir(&e.path(), depth - 1, del_mode) {
+		if e.file_type()?.is_dir()
+			&& config
+				.exclude_dirs
+				.iter()
+				.find(|&&d| e.file_name().as_os_str().to_str().map_or(false, |e| e.ends_with(d)))
+				.is_none()
+		{
+			if let Err(e) = process_dir(&e.path(), depth - 1, config) {
 				eprintln!("Warn: {}", e);
 				for c in e.chain().skip(1) {
 					eprintln!("	at: {}", c);
@@ -117,10 +146,4 @@ fn detect_and_clean(path: &Path, del_mode: &DeleteMode) -> Result<()> {
 		}
 	}
 	Ok(())
-}
-
-#[derive(Debug)]
-enum DeleteMode {
-	All,
-	Partial { doc: bool, release: bool },
 }
